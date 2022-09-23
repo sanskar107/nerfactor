@@ -187,4 +187,10 @@ class Dataset(BaseDataset):
         assert np.isclose(np.linalg.norm(normal, axis=2), 1).all(), \
             "Found normals with a norm far away from 1"
         lvis = np.clip(lvis, 0, 1)
+        rayo[:, 1:] *= -1
+        rayd[:, 1:] *= -1
+        # save = (id_, rayo, rayd, rgb, alpha, xyz, normal, lvis)
+        # import pickle
+        # pickle.dump(save, open('temp_rays.pkl', 'wb'))
+        # exit(0)
         return id_, rayo, rayd, rgb, alpha, xyz, normal, lvis

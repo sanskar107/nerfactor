@@ -315,13 +315,14 @@ class Model(ShapeModel):
     def _render(
             self, light_vis, brdf, l, n,
             relight_olat=False, relight_probes=False,
-            white_light_override=False, white_lvis_override=False):
+            white_light_override=False, white_lvis_override=True):
         linear2srgb = self.config.getboolean('DEFAULT', 'linear2srgb')
         light = self.light
         if white_light_override:
             light = np.ones_like(self.light)
         if white_lvis_override:
-            light_vis = np.ones_like(light_vis)
+            print("Overriding light vis with white light")
+            light_vis = tf.ones_like(light_vis)
         cos = tf.einsum('ijk,ik->ij', l, n) # NxL
         # Areas for intergration
         areas = tf.reshape(self.lareas, (1, -1, 1)) # 1xLx1

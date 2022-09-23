@@ -21,6 +21,7 @@ from third_party.xiuminglib import xiuminglib as xm
 
 def spherify_poses(poses):
     """poses: Nx3x5 (final column contains H, W, and focal length)."""
+    temp = poses.copy()
     rays_d = poses[:, :3, 2:3]
     rays_o = poses[:, :3, 3:4] # because pose is camera-to-world
 
@@ -78,7 +79,8 @@ def spherify_poses(poses):
         poses_reset[:, :3, :4],
         np.broadcast_to(poses[0, :3, -1:], poses_reset[:, :3, -1:].shape)
     ], -1)
-    return poses_reset, new_poses
+    # return poses_reset, new_poses
+    return temp, new_poses
 
 
 def recenter_poses(poses):
@@ -219,15 +221,17 @@ def gen_data(poses, imgs, img_paths, n_vali, outroot):
     vali_json = join(outroot, 'transforms_val.json')
     test_json = join(outroot, 'transforms_test.json')
 
-    # Recenter poses
-    poses = recenter_poses(poses) # cameras now roughly on a unit sphere
+    # # Recenter poses
+    # poses = recenter_poses(poses) # cameras now roughly on a unit sphere
 
     # Generate a spiral/spherical path for rendering videos
     poses, test_poses = spherify_poses(poses)
 
     # Training-validation split
     n_imgs = imgs.shape[0]
-    ind_vali = np.arange(n_imgs)[:-1:(n_imgs // n_vali)]
+    # ind_vali = np.arange(n_imgs)[:-1:(n_imgs // n_vali)]
+    ind_vali = np.arange(n_imgs)[::16]
+    print(f"Holding out : {ind_vali}")
     ind_train = np.array(
         [x for x in np.arange(n_imgs) if x not in ind_vali])
 

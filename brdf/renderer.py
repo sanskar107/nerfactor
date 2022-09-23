@@ -181,7 +181,7 @@ class SphereRenderer:
         return render_avg
 
 
-def gen_light_xyz(envmap_h, envmap_w, envmap_radius=1e2):
+def gen_light_xyz(envmap_h, envmap_w, envmap_radius=5e2):
     """Additionally returns the associated solid angles, for integration.
     """
     # OpenEXR "latlong" format
@@ -215,6 +215,9 @@ def gen_light_xyz(envmap_h, envmap_w, envmap_radius=1e2):
 
     assert 0 not in areas, \
         "There shouldn't be light pixel that doesn't contribute"
+
+    ## take care of coordinate convention from colmap
+    xyz[..., 1:] *= -1.0
 
     return xyz, areas
 

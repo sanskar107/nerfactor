@@ -48,6 +48,7 @@ class Model(BaseModel):
         # of DTU scenes, scaling them down to roughly below 1 helps the MLPs.
         self.xyz_scale = self.config.getfloat(
             'DEFAULT', 'xyz_scale', fallback=1.)
+        print("xyz_scale = ", self.xyz_scale)
         # ------ Lighting
         lxyz, _ = self._gen_lights()
         self.lxyz = lxyz
