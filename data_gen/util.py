@@ -21,6 +21,7 @@ from third_party.xiuminglib import xiuminglib as xm
 
 def spherify_poses(poses):
     """poses: Nx3x5 (final column contains H, W, and focal length)."""
+    temp = poses.copy()
     rays_d = poses[:, :3, 2:3]
     rays_o = poses[:, :3, 3:4] # because pose is camera-to-world
 
@@ -78,7 +79,7 @@ def spherify_poses(poses):
         poses_reset[:, :3, :4],
         np.broadcast_to(poses[0, :3, -1:], poses_reset[:, :3, -1:].shape)
     ], -1)
-    return poses_reset, new_poses
+    return temp, new_poses
 
 
 def recenter_poses(poses):
@@ -211,7 +212,8 @@ def listify_matrix(mat):
     return elements
 
 
-def gen_data(poses, imgs, img_paths, n_vali, outroot):
+def gen_data(poses, imgs, img_paths, n_vali, outroot, exposures, bds):
+    print(f"Found {imgs.shape[0] - n_vali} train images and {n_vali} val images")
     view_folder = '{mode}_{i:03d}'
 
     # Only the original NeRF and JaxNeRF implementations need these
@@ -220,14 +222,15 @@ def gen_data(poses, imgs, img_paths, n_vali, outroot):
     test_json = join(outroot, 'transforms_test.json')
 
     # Recenter poses
-    poses = recenter_poses(poses) # cameras now roughly on a unit sphere
+    # poses = recenter_poses(poses) # cameras now roughly on a unit sphere
+    print(f"Skipped recentering poses.")
 
-    # Generate a spiral/spherical path for rendering videos
-    poses, test_poses = spherify_poses(poses)
+    # # Generate a spiral/spherical path for rendering videos
+    # poses, test_poses = spherify_poses(poses)
 
     # Training-validation split
     n_imgs = imgs.shape[0]
-    ind_vali = np.arange(n_imgs)[:-1:(n_imgs // n_vali)]
+    ind_vali = np.arange(n_imgs)[-n_vali:]
     ind_train = np.array(
         [x for x in np.arange(n_imgs) if x not in ind_vali])
 
@@ -245,6 +248,7 @@ def gen_data(poses, imgs, img_paths, n_vali, outroot):
             img, join(outroot, view_folder_, 'rgba.png'), clip=True)
         # Record metadata
         pose = poses[i, :, :]
+        exp = exposures[i]
         c2w = np.vstack((pose[:3, :4], np.array([0, 0, 0, 1]).reshape(1, 4)))
         frame_meta = {
             'file_path': './%s/rgba' % view_folder_, 'rotation': 0,
@@ -255,10 +259,11 @@ def gen_data(poses, imgs, img_paths, n_vali, outroot):
             'cam_angle_x': cam_angle_x,
             'cam_transform_mat': ','.join(str(x) for x in c2w.ravel()),
             'envmap': '', 'envmap_inten': 0, 'imh': img.shape[0],
-            'imw': img.shape[1], 'scene': '', 'spp': 0,
+            'imw': img.shape[1], 'scene': '', 'spp': 0, 'exp': exp, 'cx': float(pose[0][4]), 'cy': float(pose[1][4]), 'fx': float(pose[2][4]),
             'original_path': img_paths[i]}
         xm.io.json.write(
             frame_meta, join(outroot, view_folder_, 'metadata.json'))
+        np.save(join(outroot, view_folder_, 'nearfar.npy'), bds[i])
 
     # Validation views
     vali_meta = {'camera_angle_x': cam_angle_x, 'frames': []}
@@ -270,6 +275,7 @@ def gen_data(poses, imgs, img_paths, n_vali, outroot):
             img, join(outroot, view_folder_, 'rgba.png'), clip=True)
         # Record metadata
         pose = poses[i, :, :]
+        exp = exposures[i]
         c2w = np.vstack((pose[:3, :4], np.array([0, 0, 0, 1]).reshape(1, 4)))
         frame_meta = {
             'file_path': './%s/rgba' % view_folder_, 'rotation': 0,
@@ -280,10 +286,11 @@ def gen_data(poses, imgs, img_paths, n_vali, outroot):
             'cam_angle_x': cam_angle_x,
             'cam_transform_mat': ','.join(str(x) for x in c2w.ravel()),
             'envmap': '', 'envmap_inten': 0, 'imh': img.shape[0],
-            'imw': img.shape[1], 'scene': '', 'spp': 0,
+            'imw': img.shape[1], 'scene': '', 'spp': 0, 'exp': exp, 'cx': float(pose[0][4]), 'cy': float(pose[1][4]), 'fx': float(pose[2][4]),
             'original_path': img_paths[i]}
         xm.io.json.write(
             frame_meta, join(outroot, view_folder_, 'metadata.json'))
+        np.save(join(outroot, view_folder_, 'nearfar.npy'), bds[i])
 
     # Write training and validation JSONs
     xm.io.json.write(train_meta, train_json)
@@ -291,10 +298,13 @@ def gen_data(poses, imgs, img_paths, n_vali, outroot):
 
     # Test views
     test_meta = {'camera_angle_x': cam_angle_x, 'frames': []}
-    for i in range(test_poses.shape[0]):
+    for vi, i in enumerate(ind_vali):
+    # for i in range(test_poses.shape[0]):
         view_folder_ = view_folder.format(mode='test', i=i)
         # Record metadata
-        pose = test_poses[i, :, :]
+        pose = poses[i, :, :]
+        exp = exposures[i]
+        # pose = test_poses[i, :, :]
         c2w = np.vstack((pose[:3, :4], np.array([0, 0, 0, 1]).reshape(1, 4)))
         frame_meta = {
             'file_path': '', 'rotation': 0, 'transform_matrix': c2w.tolist()}
@@ -309,10 +319,11 @@ def gen_data(poses, imgs, img_paths, n_vali, outroot):
         frame_meta = {
             'cam_angle_x': cam_angle_x,
             'cam_transform_mat': ','.join(str(x) for x in c2w.ravel()),
-            'envmap': '', 'envmap_inten': 0, 'imh': img.shape[0],
-            'imw': img.shape[1], 'scene': '', 'spp': 0, 'original_path': ''}
+            'envmap': '', 'envmap_inten': 0, 'imh': img.shape[0], 'cx': float(pose[0][4]), 'cy': float(pose[1][4]), 'fx': float(pose[2][4]),
+            'imw': img.shape[1], 'scene': '', 'spp': 0, 'exp': exp, 'original_path': ''}
         xm.io.json.write(
             frame_meta, join(outroot, view_folder_, 'metadata.json'))
+        np.save(join(outroot, view_folder_, 'nearfar.npy'), bds[i])
 
     # Write JSON
     xm.io.json.write(test_meta, test_json)

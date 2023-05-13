@@ -85,11 +85,12 @@ class Model(ShapeModel):
         # (2) Light probes
         novel_probes = OrderedDict()
         test_envmap_dir = self.config.get('DEFAULT', 'test_envmap_dir')
-        for path in xm.os.sortglob(test_envmap_dir, ext=('hdr', 'exr')):
-            name = basename(path)[:-len('.hdr')]
-            envmap = self._load_light(path)
-            novel_probes[name] = envmap
-        self.novel_probes = novel_probes
+        self.novel_probes = self._load_light(test_envmap_dir)
+        # for path in xm.os.sortglob(test_envmap_dir, ext=('hdr', 'exr')):
+        #     name = basename(path)[:-len('.hdr')]
+        #     envmap = self._load_light(path)
+        #     novel_probes[name] = envmap
+        # self.novel_probes = novel_probes
         # Tonemap and visualize these novel lighting conditions
         self.embed_light_h = self.config.getint(
             'DEFAULT', 'embed_light_h', fallback=32)
@@ -167,6 +168,15 @@ class Model(ShapeModel):
         return net
 
     def _load_light(self, path):
+        data = np.load(path)
+        ret = {}
+        for i in range(0, data.shape[0], 3):
+            tensor = tf.convert_to_tensor(data[i], dtype=tf.float32)
+            resized = imgutil.resize(tensor, new_h=self.light_res[0])
+            ret[str(i) + '_relight_'] = resized
+        return ret
+
+
         ext = basename(path).split('.')[-1]
         if ext == 'exr':
             arr = xm.io.exr.read(path)
@@ -331,24 +341,25 @@ class Model(ShapeModel):
 
         def integrate(light):
             light_flat = tf.reshape(light, (-1, 3)) # Lx3
+            ## no need to rotate, since nerfactor envmap already aligns with our convention.
             light = lvis[:, :, None] * light_flat[None, :, :] # NxLx3
             light_pix_contrib = brdf * light * cos[:, :, None] * areas # NxLx3
             rgb = tf.reduce_sum(light_pix_contrib, axis=1) # Nx3
             # Tonemapping
-            rgb = tf.clip_by_value(rgb, 0., 1.) # NOTE
+            hdr = tf.clip_by_value(rgb, 0., 100.) # NOTE
             # Colorspace transform
             if linear2srgb:
-                rgb = imgutil.linear2srgb(rgb)
-            return rgb
+                rgb = imgutil.linear2srgb(hdr)
+            return rgb, hdr
 
         # ------ Render under original lighting
-        rgb = integrate(light)
+        rgb, _ = integrate(light)
         # ------ Continue to render OLAT-relit results
         rgb_olat = None
         if relight_olat:
             rgb_olat = []
             for _, light in self.novel_olat.items():
-                rgb_relit = integrate(light)
+                rgb_relit, _ = integrate(light)
                 rgb_olat.append(rgb_relit)
             rgb_olat = tf.concat([x[:, None, :] for x in rgb_olat], axis=1)
             rgb_olat = tf.debugging.check_numerics(rgb_olat, "OLAT Renders")
@@ -357,8 +368,8 @@ class Model(ShapeModel):
         if relight_probes:
             rgb_probes = []
             for _, light in self.novel_probes.items():
-                rgb_relit = integrate(light)
-                rgb_probes.append(rgb_relit)
+                rgb_relit, hdr = integrate(light)
+                rgb_probes.append(hdr)
             rgb_probes = tf.concat([x[:, None, :] for x in rgb_probes], axis=1)
             rgb_probes = tf.debugging.check_numerics(
                 rgb_probes, "Light Probe Renders")
@@ -650,6 +661,8 @@ class Model(ShapeModel):
                     v_relit = v[:, :, i, :]
                     light_uint = self.novel_probes_uint[lname]
                     img = composite_on_avg_light(v_relit, light_uint)
+                    np.save(join(outdir, k_relit + '_composite.npy'), img)
+                    np.save(join(outdir, k_relit + '.npy'), v_relit)
                     img_dict[k_relit] = xm.io.img.write_arr(
                         img, join(outdir, k_relit + '.png'), clip=True)
             # RGB
@@ -876,4 +889,4 @@ class Model(ShapeModel):
             if (view_i + 1) > n_views_per_envmap * (map_i + 1):
                 map_i += 1
         #
-        xm.vis.video.make_video(frames, outpath=out_mp4, fps=fps)
+        # xm.vis.video.make_video(frames, outpath=out_mp4, fps=fps)
