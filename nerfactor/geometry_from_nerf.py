@@ -34,6 +34,9 @@ flags.DEFINE_string('data_root', '', "input data root")
 flags.DEFINE_string('out_root', '', "output root")
 flags.DEFINE_integer(
     'imh', None, "image height (defaults to what was used for NeRF training)")
+flags.DEFINE_integer(
+    'idx', None, "index to process for distributed training"
+)
 flags.DEFINE_string(
     'scene_bbox', None, (
         "format: x_min,x_max,y_min,y_max,z_min,z_max; for bounding real "
@@ -48,7 +51,7 @@ flags.DEFINE_integer(
         "chunk size for MLP (bump this up until your GPU gets OOM, "
         "for faster computation)"))
 flags.DEFINE_integer(
-    'lpix_chunk', 1, (
+    'lpix_chunk', 2, (
         "number of light probe pixels to be processed in parallel "
         "(doesn't matter much performance-wise)"))
 flags.DEFINE_integer('spp', 1, "samples per pixel")
@@ -83,9 +86,18 @@ def main(_):
         n_views, datapipe = make_datapipe(config, mode)
 
         # Process all views of this mode
-        for batch in tqdm(datapipe, desc=f"Views ({mode})", total=n_views):
-            process_view(config, model, batch)
+        # for batch in tqdm(datapipe, desc=f"Views ({mode})", total=n_views):
+        #     process_view(config, model, batch)
+        for idx, batch in tqdm(enumerate(datapipe), desc=f"Views ({mode})", total=n_views):
+            if FLAGS.idx is None:
+                process_view(config, model, batch)
+            else:
+                if int(idx) == int(FLAGS.idx):
+                    print(f"processing : {mode} : {idx}")
+                    process_view(config, model, batch)
 
+            # if mode == "test":
+            #     break
             if FLAGS.debug:
                 continue
 
@@ -93,7 +105,7 @@ def main(_):
 def process_view(config, model, batch):
     sps = int(np.sqrt(FLAGS.spp)) # no need to check if square
 
-    id_, hw, rayo, rayd, _ = batch
+    id_, hw, rayo, rayd, _, _, _ = batch
     id_ = id_[0].numpy().decode()
     hw = hw[0, :]
 
@@ -189,7 +201,7 @@ def compute_light_visibility(model, surf, normal, config, lvis_near=.1):
     n_lights = lxyz_flat.shape[1]
     lvis_hit = np.zeros(
         (surf.shape[0], n_lights), dtype=np.float32) # (n_surf_pts, n_lights)
-    for i in range(0, n_lights, FLAGS.lpix_chunk):
+    for i in tqdm(range(0, n_lights, FLAGS.lpix_chunk)):
         end_i = min(n_lights, i + FLAGS.lpix_chunk)
         lxyz_chunk = lxyz_flat[:, i:end_i, :] # (1, lpix_chunk, 3)
 

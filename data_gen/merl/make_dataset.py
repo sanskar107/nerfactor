@@ -72,6 +72,7 @@ def main(_):
 
     brdf_paths = xm.os.sortglob(FLAGS.indir)
     for i, path in enumerate(tqdm(brdf_paths, desc="Training & Validation")):
+        print(f"{i} = {path}")
         brdf = MERL(path=path)
 
         rusink = brdf.tbl[:, :3]

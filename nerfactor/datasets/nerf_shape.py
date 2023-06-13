@@ -138,11 +138,12 @@ class Dataset(BaseDataset):
         # Rays
         metadata = ioutil.read_json(metadata_path)
         imw = int(imh / metadata['imh'] * metadata['imw'])
+        exposure = metadata['exp']
         cam_to_world = np.array([
             float(x) for x in metadata['cam_transform_mat'].split(',')
         ]).reshape(4, 4)
         cam_angle_x = metadata['cam_angle_x']
-        rayo, rayd = self._gen_rays(cam_to_world, cam_angle_x, imh, imw)
+        rayo, rayd = self._gen_rays(cam_to_world, cam_angle_x, imh, imw, metadata['cx'], metadata['cy'], metadata['fx'])
         rayo, rayd = rayo.astype(np.float32), rayd.astype(np.float32)
         # Load precomputed shape properties from vanilla NeRF
         paths = self.meta2buf[metadata_path]

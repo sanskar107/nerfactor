@@ -151,7 +151,7 @@ def main(_):
     logger.info("Making the actual data pipeline")
     dataset_name = config.get('DEFAULT', 'dataset')
     Dataset = datasets.get_dataset_class(dataset_name)
-    dataset = Dataset(config, 'test', debug=FLAGS.debug)
+    dataset = Dataset(config, 'vali', debug=FLAGS.debug)
     n_views = dataset.get_n_views()
     no_batch = config.getboolean('DEFAULT', 'no_batch')
     datapipe = dataset.build_pipeline(no_batch=no_batch, no_shuffle=True)
@@ -179,7 +179,7 @@ def main(_):
     logger.info("Running inference")
     for batch_i, batch in enumerate(
             tqdm(datapipe, desc="Inferring Views", total=n_views)):
-        relight_olat = batch_i == n_views - 1 # only for the final view
+        relight_olat = False #batch_i == n_views - 1 # only for the final view
         # Optionally, edit (spatially-varying) albedo
         albedo_override = None
         if FLAGS.tgt_albedo:
@@ -187,7 +187,7 @@ def main(_):
             albedo_override = get_albedo_override(xyz)
         # Inference
         _, _, _, to_vis = model.call(
-            batch, mode='test', relight_olat=relight_olat, relight_probes=True,
+            batch, mode='test', relight_olat=relight_olat, relight_probes=True,  # true for relighting
             albedo_scales=albedo_scales, albedo_override=albedo_override,
             brdf_z_override=brdf_z_override)
         # Visualize

@@ -56,7 +56,7 @@ class Dataset(BaseDataset):
             # a datapoint to figure that out
             any_path = self.files[0]
             ret = self._load_data(any_path)
-            map_data = ret[-1] # OK as long as shape is (H, W[, ?])
+            map_data = ret[-3] # OK as long as shape is (H, W[, ?])
             bs = int(np.prod(map_data.shape[:2]))
         return bs
 
@@ -93,7 +93,7 @@ class Dataset(BaseDataset):
         return basename(dirname(metadata_path))
 
     # pylint: disable=arguments-differ
-    def _process_example_postcache(self, id_, rayo, rayd, rgb):
+    def _process_example_postcache(self, id_, rayo, rayd, rgb, near, far):
         """Records image dimensions and samples rays.
         """
         hw = tf.shape(rgb)[:2]
@@ -101,7 +101,7 @@ class Dataset(BaseDataset):
         # NOTE: some memory waste below to make distributed strategy happy
         id_ = tf.tile(tf.expand_dims(id_, axis=0), (tf.shape(rgb)[0],))
         hw = tf.tile(tf.expand_dims(hw, axis=0), (tf.shape(rgb)[0], 1))
-        return id_, hw, rayo, rayd, rgb
+        return id_, hw, rayo, rayd, rgb, near, far
 
     def _sample_rays(self, rayo, rayd, rgb):
         # Shortcircuit if need all rays
@@ -130,15 +130,17 @@ class Dataset(BaseDataset):
     def _process_example_precache(self, path):
         """Loads data from paths.
         """
-        id_, rayo, rayd, rgb = tf.py_function(
+        id_, rayo, rayd, rgb, near, far = tf.py_function(
             self._load_data, [path],
-            (tf.string, tf.float32, tf.float32, tf.float32))
-        return id_, rayo, rayd, rgb
+            (tf.string, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32))
+        return id_, rayo, rayd, rgb, near, far
 
     def _load_data(self, metadata_path): # pylint: disable=arguments-differ
         imh = self.config.getint('DEFAULT', 'imh')
         white_bg = self.config.getboolean('DEFAULT', 'white_bg')
         metadata_path = tutil.eager_tensor_to_str(metadata_path)
+        nearfar_path = metadata_path.replace('metadata.json', 'nearfar.npy')
+        nearfar = np.load(nearfar_path)
         id_ = self._parse_id(metadata_path)
         # Generate rays
         metadata = ioutil.read_json(metadata_path)
@@ -147,12 +149,12 @@ class Dataset(BaseDataset):
             float(x) for x in metadata['cam_transform_mat'].split(',')
         ]).reshape(4, 4)
         cam_angle_x = metadata['cam_angle_x']
-        rayo, rayd = self._gen_rays(cam_to_world, cam_angle_x, imh, imw)
+        rayo, rayd = self._gen_rays(cam_to_world, cam_angle_x, imh, imw, metadata['cx'], metadata['cy'], metadata['fx'])
         rayo, rayd = rayo.astype(np.float32), rayd.astype(np.float32)
         # Shortcircuit if testing
         if self.mode == 'test':
             rgb = np.zeros((imh, imw, 3), dtype=np.float32) # placeholder
-            return id_, rayo, rayd, rgb
+            return id_, rayo, rayd, rgb, nearfar[0:1], nearfar[1:2]
         # Training or validation, where each camera has a paired image
         img_path = self.meta2img[metadata_path]
         rgba = xm.io.img.load(img_path)
@@ -166,10 +168,10 @@ class Dataset(BaseDataset):
         bg = np.ones_like(rgb) if white_bg else np.zeros_like(rgb)
         rgb = imgutil.alpha_blend(rgb, alpha, tensor2=bg)
         rgb = rgb.astype(np.float32)
-        return id_, rayo, rayd, rgb
+        return id_, rayo, rayd, rgb, nearfar[0:1], nearfar[1:2]
 
     # pylint: disable=arguments-differ
-    def _gen_rays(self, to_world, angle_x, imh, imw):
+    def _gen_rays(self, to_world, angle_x, imh, imw, cx, cy, fx):
         near = self.config.getfloat('DEFAULT', 'near')
         ndc = self.config.getboolean('DEFAULT', 'ndc')
         # Ray origin
@@ -186,9 +188,16 @@ class Dataset(BaseDataset):
         # |
         # v y (0, h)
         fl = .5 * imw / np.tan(.5 * angle_x)
+        assert (fl - fx) / fl < 1e-6, "fx does not match angle_x"
+        # fy = fx + 0.55912
+        fy = fx
+        
         rayd = np.stack(
-            ((xs - .5 * imw) / fl, -(ys - .5 * imh) / fl, -np.ones_like(xs)),
+            ((xs - cx) / fx, -(ys - cy) / fy, -np.ones_like(xs)),
             axis=-1) # local
+        # rayd = np.stack(
+        #     ((xs - .5 * imw) / fl, -(ys - .5 * imh) / fl, -np.ones_like(xs)),
+        #     axis=-1) # local
         rayd = np.sum(
             rayd[:, :, np.newaxis, :] * to_world[:3, :3], axis=-1) # world
         if ndc:

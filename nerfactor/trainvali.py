@@ -30,6 +30,10 @@ from nerfactor.util import logging as logutil, io as ioutil, \
     config as configutil
 
 
+physical_devices = tf.config.list_physical_devices('GPU') 
+for device in physical_devices:
+    tf.config.experimental.set_memory_growth(device, True)
+
 flags.DEFINE_string(
     'config', 'nerf.ini', "base .ini file in config/ or a full path")
 flags.DEFINE_string('config_override', '', "e.g., 'key1=value1,key2=value2'")
@@ -56,6 +60,7 @@ def main(_):
     if not exists(config_ini):
         config_ini = join(dirname(__file__), 'config', FLAGS.config)
     config = ioutil.read_config(config_ini)
+    config.set('DEFAULT', 'device', FLAGS.device)
     # Any override?
     if FLAGS.config_override != '':
         for kv in FLAGS.config_override.split(','):

@@ -34,8 +34,9 @@ class Model(BaseModel):
     def __init__(self, config, debug=False):
         super().__init__(config, debug=debug)
         self.use_views = self.config.getboolean('DEFAULT', 'use_views')
-        self.near = self.config.getfloat('DEFAULT', 'near')
-        self.far = self.config.getfloat('DEFAULT', 'far')
+        self.near = self.config.getfloat('DEFAULT', 'near') # / 2.0
+        self.far = self.config.getfloat('DEFAULT', 'far') # * 2.0
+        print(f"Nerf model Near : {self.near}, far : {self.far}")
         self.n_samples_fine = self.config.getint('DEFAULT', 'n_samples_fine')
         self.white_bg = self.config.getboolean('DEFAULT', 'white_bg')
         # Embedders
@@ -101,8 +102,9 @@ class Model(BaseModel):
 
     def call(self, batch, mode='train'):
         self._validate_mode(mode)
-        id_, hw, rayo, rayd, rgb = batch # all flattened
-        pred_coarse, pred_fine = self._render_rays(rayo, rayd, mode=mode)
+        id_, hw, rayo, rayd, rgb, near, far = batch # all flattened
+        # print(f"near, far : {near}, {far}")
+        pred_coarse, pred_fine = self._render_rays(rayo, rayd, near, far, mode=mode)
         # Prepare values to return
         pred = {
             'coarse': pred_coarse['rgb'],
@@ -146,7 +148,7 @@ class Model(BaseModel):
             tf.concat((z_coarse, z_fine), -1), -1)
         return z_all
 
-    def _render_rays(self, rayo, rayd, mode='train'):
+    def _render_rays(self, rayo, rayd, near, far, mode='train'):
         n_samples_coarse = self.config.getint('DEFAULT', 'n_samples_coarse')
         lin_in_disp = self.config.getboolean('DEFAULT', 'lin_in_disp')
         if mode == 'train':
@@ -156,6 +158,9 @@ class Model(BaseModel):
         # Normalize ray directions
         rayd = tf.linalg.l2_normalize(rayd, axis=1)
         # Points in space to evaluate the coarse model at
+        # z = self.gen_z(
+        #     near, far, n_samples_coarse, rayo.shape[0],
+        #     lin_in_disp=lin_in_disp, perturb=perturb)
         z = self.gen_z(
             self.near, self.far, n_samples_coarse, rayo.shape[0],
             lin_in_disp=lin_in_disp, perturb=perturb)

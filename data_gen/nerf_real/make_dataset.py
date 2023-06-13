@@ -33,14 +33,24 @@ FLAGS = flags.FLAGS
 def main(_):
     # Load poses
     poses_path = join(FLAGS.scene_dir, 'poses_bounds.npy')
+    val_poses_path = join(FLAGS.scene_dir, 'val_poses_bounds.npy')
     poses_arr = xm.io.np.read_or_write(poses_path)
+    val_poses_arr = xm.io.np.read_or_write(val_poses_path)
+    num_train = poses_arr.shape[0]
+    num_val = val_poses_arr.shape[0]
+    poses_arr = np.concatenate([poses_arr, val_poses_arr], axis=0)
     poses = poses_arr[:, :-2].reshape([-1, 3, 5]).transpose([1, 2, 0])
     bds = poses_arr[:, -2:].transpose([1, 0])
+    print(f"Bounds min : {bds.min()}, max : {bds.max()}")
+
+    # Load exposures
+    exp_path = join(FLAGS.scene_dir, 'exposure.npy')
+    exposures = xm.io.np.read_or_write(exp_path)
 
     # Load and resize images
     img_dir = join(FLAGS.scene_dir, 'images')
     img_paths = xm.os.sortglob(
-        img_dir, filename='*', ext='jpg', ext_ignore_case=True)
+        img_dir, filename='*', ext='png', ext_ignore_case=True)
     assert img_paths, "No image globbed"
     if FLAGS.debug:
         img_paths = img_paths[:4]
@@ -56,10 +66,15 @@ def main(_):
         else:
             assert float(img.shape[0]) / FLAGS.h == factor, \
                 "Images are of varying sizes"
+        mask_file = img_file.replace('images/', 'masks/')
+        mask = xm.io.img.read(mask_file)
+        mask = xm.img.normalize_uint(mask)
+
+        img = np.dstack((img, mask[..., None]))
         img = xm.img.resize(img, new_h=FLAGS.h, method='tf')
-        if img.shape[2] == 3:
-            # NOTE: add an all-one alpha
-            img = np.dstack((img, np.ones_like(img)[:, :, :1]))
+        # if img.shape[2] == 3:
+        #     # NOTE: add an all-one alpha
+        #     img = np.dstack((img, np.ones_like(img)[:, :, :1]))
         imgs.append(img)
     imgs = np.stack(imgs, axis=-1)
 
@@ -70,9 +85,13 @@ def main(_):
         "Mismatch between numbers of images ({n_imgs}) and "
         "poses ({n_poses})").format(n_imgs=n_imgs, n_poses=n_poses)
 
-    # Update poses according to downsampling
-    poses[:2, 4, :] = np.array(
-        imgs.shape[:2]).reshape([2, 1]) # override image size
+    # # Update poses according to downsampling
+    # poses[:2, 4, :] = np.array(
+    #     imgs.shape[:2]).reshape([2, 1]) # override image size
+
+    # scale cx cy
+    poses[:2, 4, :] *= 1. / factor
+
     poses[2, 4, :] = poses[2, 4, :] * 1. / factor # scale focal length
 
     # Correct rotation matrix ordering and move variable dim to axis 0
@@ -82,12 +101,28 @@ def main(_):
     imgs = np.moveaxis(imgs, -1, 0) # NxHxWx4
     bds = np.moveaxis(bds, -1, 0).astype(np.float32) # Nx2
 
-    # Rescale according to a default bd factor
-    scale = 1. / (bds.min() * FLAGS.bound_factor)
+    # For objrel, synthetic
+    # # Rescale according to a default bd factor
+    scale = 1.0
+    print(f"Scaling by {scale} default")
+    # scale = 1. / (bds.min() * FLAGS.bound_factor)
     poses[:, :3, 3] *= scale # scale translation
     bds *= scale
 
-    gen_data(poses, imgs, img_paths, FLAGS.n_vali, FLAGS.outroot)
+    # Rescale according to a default bd factor
+    ## dtu
+    # scale = 1. / (bds.min() * FLAGS.bound_factor)
+
+    ## bmvs
+    # scale = 1.0
+
+    # center = poses[:, :3, 3].mean(0)
+    # poses[:, :3, 3] -= center # center translation
+    # poses[:, :3, 3] *= scale # scale translation
+    # bds *= scale
+    # print(f"Scaling by {scale} and recenter by {center}")
+
+    gen_data(poses, imgs, img_paths, num_val, FLAGS.outroot, exposures, bds)
 
 
 if __name__ == '__main__':
